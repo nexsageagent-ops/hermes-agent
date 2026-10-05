@@ -1,0 +1,13 @@
+import json, ssl, sys, pathlib, tempfile
+sys.path.insert(0, sys.argv[1])
+from pm.downloader import Download, Source
+art = json.loads((pathlib.Path(sys.argv[1]) / "pm" / "lock.json").read_text(encoding="utf-8"))["packages"]["python"]["artifacts"]["win32-x64"]
+ctx = ssl.create_default_context()
+names = [dict(x[0] for x in c["subject"]).get("commonName") for c in ctx.get_ca_certs()]
+d = pathlib.Path(tempfile.mkdtemp())
+try:
+    Download([Source(art["url"], d / "py.tgz", art["sha256"])], partials_dir=d / "p").run()
+    r = f"OK {(d / 'py.tgz').stat().st_size} bytes, sha256 verified"
+except Exception as e:
+    r = f"FAIL {e}"
+print(f"RESULT {sys.argv[2]}: py={sys.version.split()[0]} X1_in_store={names.count('ISRG Root X1')} RootYR_in_store={names.count('Root YR')} -> {r}")

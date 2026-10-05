@@ -1,0 +1,48 @@
+name: TEMP cold TLS proof (never merge)
+on:
+  push:
+    branches: ['e2e/cold-tls-proof']
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: py311
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: py314
+        with:
+          python-version: '3.14'
+      - name: Shape the store like the reporter's (Root YR cached, ISRG Root X1 absent)
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          New-Item -Force 'HKLM:\Software\Policies\Microsoft\SystemCertificates\AuthRoot' | Out-Null
+          Set-ItemProperty 'HKLM:\Software\Policies\Microsoft\SystemCertificates\AuthRoot' DisableRootAutoUpdate 1 -Type DWord
+          Get-ChildItem -Recurse Cert:\ | Where-Object { $_.Subject -like '*CN=ISRG Root X1*' } | ForEach-Object { Write-Host "remove $($_.PSParentPath) $($_.Thumbprint)"; Remove-Item $_.PSPath -Force }
+          New-Item -ItemType Directory -Force base, fix | Out-Null
+          Copy-Item -Recurse pm base/pm
+          Copy-Item -Recurse pm fix/pm
+          Copy-Item proof/downloader.fixed.txt fix/pm/downloader.py -Force
+      - name: A/B before caching Root YR (control, error 20 expected on all)
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          & '${{ steps.py311.outputs.python-path }}' -I -S proof/cold.txt base "control-base-3.11"
+          & '${{ steps.py311.outputs.python-path }}' -I -S proof/cold.txt fix  "control-fix-3.11"
+      - name: Cache Root YR in the intermediate store
+        timeout-minutes: 2
+        shell: pwsh
+        run: Import-Certificate -FilePath proof/root-yr.pem -CertStoreLocation Cert:\LocalMachine\CA | Format-List Subject,Thumbprint
+      - name: A/B on the reporter's store shape
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          & '${{ steps.py311.outputs.python-path }}' -I -S proof/cold.txt base "A-base-3.11"
+          & '${{ steps.py311.outputs.python-path }}' -I -S proof/cold.txt fix  "B-fix-3.11"
+          & '${{ steps.py314.outputs.python-path }}' -I -S proof/cold.txt base "C-base-3.14"
